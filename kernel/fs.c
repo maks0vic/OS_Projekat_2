@@ -442,6 +442,10 @@ stati(struct inode *ip, struct stat *st)
 	st->type = ip->type;
 	st->nlink = ip->nlink;
 	st->size = ip->size;
+	int size = ip->size;
+	int bl = size/512;
+	if (size%512 > 0) bl++;
+	st->blocks = bl + bl/13;
 }
 
 // Read data from inode.

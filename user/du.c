@@ -22,34 +22,35 @@ fmtname(char *path)
 	return buf;
 }
 
-void
-ls(char *path)
+int
+du(char *path)
 {
 	char buf[512], *p;
 	int fd;
 	struct dirent de;
 	struct stat st;
+	int sum = 0;
 
 	if((fd = open(path, 0x010)) < 0){
-		fprintf(2, "ls: cannot open %s\n", path);
+		fprintf(2, "du: cannot open %s\n", path);
 		return;
 	}
 
 	if(fstat(fd, &st) < 0){
-		fprintf(2, "ls: cannot stat %s\n", path);
+		fprintf(2, "du: cannot stat %s\n", path);
 		close(fd);
 		return;
 	}
 
 	switch(st.type){
 	case T_FILE:
-		printf("%s %d %d %d %d\n", fmtname(path), st.type, st.ino, st.size, st.blocks);
-		// printf("%s \n", fmtname(path));
+		printf("%s %d\n", fmtname(path), st.blocks);
+		sum += st.blocks;
 		break;
 
 	case T_DIR:
 		if(strlen(path) + 1 + DIRSIZ + 1 > sizeof buf){
-			printf("ls: path too long\n");
+			printf("du: path too long\n");
 			break;
 		}
 		// printf("path %s\n", path);
@@ -63,30 +64,64 @@ ls(char *path)
 			p[DIRSIZ] = 0;
 			// printf("buf:%s\n",buf);
 			if(stat(buf, &st) < 0){
-				printf("ls: cannot stat %s\n", buf);
+				printf("du: cannot stat %s\n", buf);
 				continue;
 			}
-			printf("%s %d %d %d %d\n", fmtname(buf), st.type, st.ino, st.size, st.blocks);
+
+			char *last;
+			// Find first character after last slash.
+			for(last=buf+strlen(buf); last >= buf && *last != '/'; last--)
+				;
+			last++;
+
+
+			char *la;
+			for(la=path+strlen(path); la >= path && *la != '/'; la--)
+				;
+			la++;
+
+			if (strcmp(last, ".") == 0 && strcmp(path, la) == 0)
+			{
+				if (!(strcmp(last, ".") == 0 && strcmp(path, ".") == 0 && strcmp(la, ".") == 0))
+				{
+					printf("%s %d\n", fmtname(path), st.blocks);
+					sum += st.blocks;
+				}
+			}
+			if (strcmp(last, ".") != 0 && strcmp(last, "..") != 0)
+			{
+				printf("%s %d\n", fmtname(buf), st.blocks);
+				sum += st.blocks;
+				if (st.type == 1) {
+					sum += du(buf);
+				}
+			}
+
 		}
 		break;
 
 	case T_SYMLINK:
-		printf("%s %d %d %d %d\n", fmtname(path), st.type, st.ino, st.size, st.blocks);
+		printf("%s %d\n", fmtname(path), st.blocks);
+		sum += st.blocks;
 		break;
 	}
 	close(fd);
+	return sum;
 }
 
 int
 main(int argc, char *argv[])
 {
 	int i;
-
+	int total = 0;
 	if(argc < 2){
-		ls(".");
+		total += du(".");
+		printf("total = %d\n",total);
 		exit();
 	}
+
 	for(i=1; i<argc; i++)
-		ls(argv[i]);
+		total += du(argv[i]);
+	printf("total = %d\n",total);
 	exit();
 }

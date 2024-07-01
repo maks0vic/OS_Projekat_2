@@ -250,7 +250,7 @@ create(char *path, short type, short major, short minor)
 	if((ip = dirlookup(dp, name, 0)) != 0){
 		iunlockput(dp);
 		ilock(ip);
-		if((type == T_FILE && ip->type == T_FILE) || ip->type == T_DEV)
+		if((type == T_FILE && ip->type == T_FILE) || ip->type == T_DEV || type == T_SYMLINK)
 			return ip;
 		iunlockput(ip);
 		return 0;
@@ -306,10 +306,53 @@ sys_open(void)
 			return -1;
 		}
 		ilock(ip);
-		if(ip->type == T_DIR && omode != O_RDONLY){
+		if(ip->type == T_DIR && (omode & 0x001)){
 			iunlockput(ip);
 			end_op();
 			return -1;
+		}
+
+		if(ip->type == T_SYMLINK && omode != O_NOFOLLOW){
+			uint dubina = 0;
+			int fd;
+			struct file *fi;
+			while (ip->type == T_SYMLINK)
+			{
+				if (dubina == 3) {
+					cprintf("Loop\n");
+					iunlockput(ip);
+					end_op();
+					return -1;
+				}
+				dubina++;
+				begin_op();
+				if((fi = filealloc()) == 0 || (fd = fdalloc(fi)) < 0){
+					if(fi)
+						fileclose(fi);
+					iunlockput(ip);
+					end_op();
+					return -1;
+				}
+
+				fi->type = FD_INODE;
+				fi->ip = ip;
+				fi->off = 0;
+				fi->readable = 1;
+				fi->writable = 0;
+
+				iunlock(ip);
+				end_op();
+				char p[512];
+				int n = 512;
+				char name[510] = "";
+				int r = fileread(fi, p, n);
+				strncpy(name, p, r);
+
+				ip = namei(name);
+				if (ip == 0)
+					return -1;
+				ilock(ip);
+			}
 		}
 	}
 
@@ -439,5 +482,49 @@ sys_pipe(void)
 	}
 	fd[0] = fd0;
 	fd[1] = fd1;
+	return 0;
+}
+
+int
+sys_symlink(void)
+{
+	struct inode *ip;
+	char *target, *linkname;
+
+	if(argstr(0, &target) < 0 || argstr(1, &linkname) < 0)
+		return -1;
+
+	begin_op();
+	ip = create(linkname, T_SYMLINK, 0, 0);
+	if(ip == 0){
+		end_op();
+		return -1;
+	}
+
+	int fd, omode = O_RDWR;
+	struct file *f;
+
+	if((f = filealloc()) == 0 || (fd = fdalloc(f)) < 0){
+		if(f)
+			fileclose(f);
+		iunlockput(ip);
+		end_op();
+		return -1;
+	}
+
+	f->type = FD_INODE;
+	f->ip = ip;
+	f->off = 0;
+	f->readable = 1;
+	f->writable = 1;
+
+	iunlock(ip);
+
+
+	if (filewrite(f, target, strlen(target)) != strlen(target))
+		return -1;
+
+	f->writable = 0;
+	end_op();
 	return 0;
 }
